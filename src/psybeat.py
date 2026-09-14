@@ -96,6 +96,69 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
             out[i:j] = sosfilt(sos, x[i:j])
         return out*0.5
 
+    # ---------- supersaw / trance lead ----------
+    def supersaw_note(f, n, voices=7, detune=0.012, cutoff=4200.0):
+        t = np.arange(n)/SR
+        out = np.zeros(n)
+        spread = np.linspace(-detune, detune, voices)
+        for i, d in enumerate(spread):
+            out += sawtooth(2*np.pi*f*(1+d)*t + i*0.7)
+        out /= voices
+        e = env_ad(n, 0.006, 0.5, 2.0)
+        e *= np.clip(1.0 - t/(n/SR*1.6), 0, 1)
+        sos = iirfilter(2, min(cutoff/(SR/2), 0.98), btype='low', ftype='butter', output='sos')
+        return sosfilt(sos, out*e)*0.55
+
+    def pluck_note(f, n):
+        """Short detuned pluck (rolling trance arp voice)."""
+        t = np.arange(n)/SR
+        osc = (sawtooth(2*np.pi*f*t) + 0.6*sawtooth(2*np.pi*f*1.01*t))
+        e = env_ad(n, 0.001, 0.035, 4.0)
+        x = osc*e
+        fc = 900 + 6000*np.exp(-t/0.03)
+        out = np.zeros(n)
+        blk = 128
+        for i in range(0, n, blk):
+            j = min(i+blk, n)
+            sos = iirfilter(2, min(fc[i]/(SR/2), 0.98), btype='low', ftype='butter', output='sos')
+            out[i:j] = sosfilt(sos, x[i:j])
+        return out*0.4
+
+    # ---------- transition FX ----------
+    def riser(n, f0=200.0, f1=6000.0, shape=2.0):
+        """Uplifting noise + swept-tone riser ending on a small impact."""
+        t = np.arange(n)/SR
+        frac = t/max(t[-1], 1e-6)
+        nz = rng.normal(0, 1, n)
+        # resonant sweep on noise
+        fc = f0 + (f1-f0)*frac**shape
+        out = np.zeros(n)
+        blk = 256
+        for i in range(0, n, blk):
+            j = min(i+blk, n)
+            sos = iirfilter(2, [max(fc[i]/(SR/2)*0.5, 0.002), min(fc[i]/(SR/2), 0.98)],
+                            btype='band', ftype='butter', output='sos')
+            out[i:j] = sosfilt(sos, nz[i:j])
+        # rising tone underneath
+        fsw = f0*2 + (f1*0.25 - f0*2)*frac**2
+        tone = np.sin(2*np.pi*np.cumsum(fsw)/SR)
+        amp = frac**1.4
+        return (out*0.5 + tone*0.25)*amp
+
+    def impact(dur=1.2, g=1.0):
+        n = int(dur*SR); t = np.arange(n)/SR
+        boom = np.sin(2*np.pi*(60*np.exp(-t/0.12)+34)*t)*np.exp(-t/0.35)
+        nz = sosfilt(butter(2, [200/(SR/2), 9000/(SR/2)], btype='band', output='sos'),
+                     rng.normal(0, 1, n))*np.exp(-t/0.25)
+        return (boom*0.8 + nz*0.4)*g
+
+    def uplift(dur=0.8, g=1.0):
+        """Reverse-style whoosh into a downbeat."""
+        n = int(dur*SR); t = np.arange(n)/SR
+        nz = sosfilt(butter(2, [300/(SR/2), 7000/(SR/2)], btype='band', output='sos'),
+                     rng.normal(0, 1, n))
+        return nz*(t/dur)**2*g
+
     # ---------- arrangement ----------
     mix = np.zeros(N+SR)
     K, S, C, H, HO = kick(), snare(), clap(), hat(), hat(True)
