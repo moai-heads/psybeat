@@ -160,48 +160,139 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
         return nz*(t/dur)**2*g
 
     # ---------- arrangement ----------
-    mix = np.zeros(N+SR)
+    # Section map as fractions of total length, so it scales with --bars.
+    # 32 bars @ 145 BPM ->
+    #   0-4 intro | 4-8 build | 8-16 DROP 1 | 16-20 breakdown
+    #   20-22 build2 | 22-28 DROP 2 | 28-32 outro
+    SECTIONS = [
+        ("intro",     0.1250),
+        ("build",     0.1250),
+        ("drop1",     0.2500),
+        ("breakdown", 0.1250),
+        ("build2",    0.0625),
+        ("drop2",     0.1875),
+        ("outro",     0.1250),
+    ]
+    bounds, acc = {}, 0.0
+    for name, frac in SECTIONS:
+        b0 = int(round(acc*BARS)); acc += frac
+        b1 = int(round(acc*BARS))
+        for b in range(b0, b1):
+            bounds[b] = name
+    last_bar = BARS - 1
+
+    mix = np.zeros(N + 2*SR)
     K, S, C, H, HO = kick(), snare(), clap(), hat(), hat(True)
 
     def place(buf, sig, tsec, gain=1.0):
         i = int(tsec*SR)
         j = min(i+len(sig), len(buf))
-        buf[i:j] += sig[:j-i]*gain
+        if j > i:
+            buf[i:j] += sig[:j-i]*gain
+
+    # chord roots (semitones from A) cycled per bar: Am - F - C - G
+    CHORD = [0, -4, 3, -2]
+    TRIAD = [0, 3, 7]
+    A2 = 110.0
+
+    def chord_freqs(root_semi, octave=0):
+        base = A2*2**(root_semi/12)*2**octave
+        return [base*2**(s/12) for s in TRIAD]
 
     for bar in range(BARS):
         t0 = bar*BAR
-        # kick on every beat
-        for b in range(4):
-            place(mix, K, t0+b*BEAT, 1.0)
-        # snare/clap on 2 & 4
-        for b in (1,3):
-            place(mix, S, t0+b*BEAT, 0.9)
-            place(mix, C, t0+b*BEAT, 0.55)
-        # rolling 16th bassline
-        pattern = [1]*16
-        for s in range(16):
-            if not pattern[s]: continue
-            s16 = (s + bar*16)
-            # subtle note movement: root A1, drop to G1 / F1 in places
-            prog = [[55.0],[55.0],[55.0,55.0],[55.0]][bar%4]
-            f = prog[s16 % len(prog)]
-            if bar%8>=4 and s in (7,15): f *= 2      # octave lift
-            place(mix, bass_note(f, int(STEP*SR*0.99)), t0+s*STEP, 0.95)
-        # hats from bar 4
-        if bar >= 4:
-            place(mix, H,  t0+0*BEAT+STEP*0, 1)
+        sec = bounds.get(bar, "outro")
+        in_drop = sec in ("drop1", "drop2")
+        is_drop2 = sec == "drop2"
+        chord = CHORD[bar % len(CHORD)]
+
+        drums = sec not in ("breakdown",)
+        full_drums = in_drop or sec == "outro" or sec == "build"
+        bass_on = sec not in ("breakdown",)
+
+        # ---- kick (four on the floor) ----
+        if drums:
             for b in range(4):
-                place(mix, H, t0+b*BEAT+STEP*2, 0.85)
-                place(mix, H, t0+b*BEAT+STEP*2+STEP, 0.5)
-            place(mix, HO, t0+3*BEAT+STEP*3, 0.8)
-        # acid lead from bar 8
-        if bar >= 8:
+                place(mix, K, t0+b*BEAT, 1.0)
+
+        # ---- snare/clap backbeat ----
+        if full_drums:
+            for b in (1, 3):
+                place(mix, S, t0+b*BEAT, 0.9)
+                place(mix, C, t0+b*BEAT, 0.55)
+        elif sec == "intro" and bar >= 1:
+            place(mix, S, t0+3*BEAT, 0.6)
+
+        # ---- rolling 16th bassline ----
+        if bass_on:
+            bass_gain = 0.95 if not in_drop else 1.05
             for s in range(16):
-                if s % 2 == 1 and (bar+s) % 4 != 0: continue
-                semi = ACID_SEMIS[s]
-                f = 110.0*2**(semi/12)
-                br = 1.0 if bar >= 12 else 0.7
-                place(mix, acid_note(f, int(STEP*1.6*SR), br), t0+s*STEP, 0.5)
+                f = A2*2**(chord/12)*0.5          # A1-ish root
+                if is_drop2 and s in (7, 15):
+                    f *= 2                          # octave lift in drop 2
+                elif in_drop and s in (15,):
+                    f *= 2
+                place(mix, bass_note(f, int(STEP*SR*0.99)), t0+s*STEP, bass_gain)
+
+        # ---- hats ----
+        if full_drums and sec != "intro":
+            for b in range(4):
+                place(mix, H,  t0+b*BEAT, 0.9)
+                place(mix, H,  t0+b*BEAT+STEP*2, 0.8)
+                place(mix, H,  t0+b*BEAT+STEP*2+STEP, 0.5)
+            place(mix, HO, t0+3*BEAT+STEP*3, 0.8)
+        elif in_drop and bar % 2 == 0:
+            for b in range(4):
+                place(mix, H, t0+b*BEAT+STEP*2, 0.7)
+
+        # ---- DROP leads: supersaw chord + acid + arp pluck ----
+        if in_drop:
+            lead_gain = 0.42 if is_drop2 else 0.34
+            # supersaw pads chording on the beat
+            for b, ct in ((0, chord_freqs(chord)), (2, chord_freqs(chord, 1))):
+                for f in ct:
+                    place(mix, supersaw_note(f, int(BEAT*0.9*SR),
+                                             voices=7, detune=0.010,
+                                             cutoff=5200 if is_drop2 else 4200),
+                          t0+b*BEAT, lead_gain)
+            # acid 16th lead
+            for s in range(16):
+                if s % 2 == 1 and (bar+s) % 4 != 0:
+                    continue
+                f = A2*2**(chord/12)*2**(ACID_SEMIS[s]/12)
+                place(mix, acid_note(f, int(STEP*1.6*SR), 1.0 if is_drop2 else 0.7),
+                      t0+s*STEP, 0.45)
+            # plucky 16th arp (drop 2 only) - octave-jumping chord tones
+            if is_drop2:
+                for s in range(16):
+                    f = A2*2**(chord/12)*2**(TRIAD[s % 3]/12)*2**(1 if s % 4 >= 2 else 0)
+                    place(mix, pluck_note(f, int(STEP*1.2*SR)), t0+s*STEP, 0.5)
+
+        # ---- breakdown: atmospheric leads, no kick/bass ----
+        if sec == "breakdown":
+            # sustained supersaw chord across the section
+            for f in chord_freqs(chord):
+                place(mix, supersaw_note(f, int(BAR*SR*0.95), voices=9, detune=0.014,
+                                         cutoff=2600), t0, 0.40)
+            # slow acid motif on the offbeats
+            for s in (2, 6, 10, 14):
+                f = A2*2**(chord/12)*2**(ACID_SEMIS[s]/12)
+                place(mix, acid_note(f, int(STEP*2.0*SR), 0.5), t0+s*STEP, 0.4)
+            place(mix, uplift(0.7, 0.5), t0+BAR-0.7, 1.0)
+
+        # ---- build risers: last bar of build/build2 accelerates snares + riser ----
+        if sec in ("build", "build2") and bar == max(b for b in bounds if bounds[b] == sec):
+            for i in range(16):
+                g = 0.35 + 0.55*(i/15)
+                place(mix, S, t0+i*STEP, g)
+            place(mix, riser(int(BAR*SR), f0=250, f1=7000, shape=2.2), t0, 0.9)
+            place(mix, uplift(BEAT*0.9, 0.8), t0+BAR-BEAT*0.9, 1.0)
+
+        # ---- impacts landing on each drop's downbeat ----
+        if in_drop and (bar == min(b for b in bounds if bounds[b] == sec)):
+            place(mix, impact(1.4, 1.0), t0, 0.9)
+
+        # ---- intro filter sweep feel: thin out first bars via gains already applied ----
 
     # ---------- sidechain duck (kick ducks the bass/lead) ----------
     duck = np.ones(len(mix))
@@ -231,6 +322,11 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
     mix[-int(0.6*SR):] *= np.linspace(1,0,int(0.6*SR))
 
 
+    # trim trailing silence left by the placement padding
+    nz = np.where(np.abs(mix) > 1e-4)[0]
+    if len(nz):
+        mix = mix[:min(len(mix), nz[-1] + int(0.3*SR))]
+
     return mix.astype("float32")
 
 
@@ -250,7 +346,7 @@ def encode_mp3(wav_path: str, mp3_path: str, bitrate: str = "192k") -> bool:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Render a psytrance beat.")
     ap.add_argument("--bpm", type=float, default=145.0, help="tempo (default 145)")
-    ap.add_argument("--bars", type=int, default=16, help="length in bars (default 16)")
+    ap.add_argument("--bars", type=int, default=32, help="length in bars (default 32)")
     ap.add_argument("--seed", type=int, default=7, help="RNG seed (default 7)")
     ap.add_argument("--outdir", default="out", help="output directory (default out/)")
     ap.add_argument("--no-mp3", action="store_true", help="skip MP3 encoding")
