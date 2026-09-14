@@ -11,10 +11,11 @@ Instructions for AI agents modifying this repository.
    ```bash
    python3 src/psybeat.py
    ```
-3. Stage and commit immediately:
+3. Stage and commit immediately, then push:
    ```bash
    git add -A
    git commit -m "<area>: <imperative summary>"
+   git push
    ```
 4. Do **not** batch unrelated changes into one commit.
 5. Do **not** leave the working tree dirty at the end of a session. Either
@@ -35,6 +36,15 @@ Examples:
 - Determinism: a fixed RNG seed is used for noise. If you add
   randomness, expose it as a seed and keep the default reproducible.
 - Output files (`out/`, `*.wav`, `*.mp3`) are gitignored — never commit them.
+
+## Remote
+
+- `origin` = https://github.com/moai-heads/psybeat (public, default branch `main`).
+- `main` tracks `origin/main`. After every commit, `git push` so the remote
+  reflects the committed state.
+- Auth is via the `gh` CLI credential helper (`gh auth git-credential`);
+  no token is stored in this repo.
+- Large binaries are never pushed: see the gitignore note under *Project facts*.
 
 ## Testing
 
