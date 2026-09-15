@@ -36,15 +36,16 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
 
     # ---------- drums ----------
     def kick():
-        n = int(0.45*SR); t = np.arange(n)/SR
-        f = 46 + 105*np.exp(-t/0.018)          # pitch sweep
+        # Psy kick: fast vertical pitch drop, short punchy decay, tight sub tail.
+        n = int(0.28*SR); t = np.arange(n)/SR
+        f = 49 + 195*np.exp(-t/0.0085)          # fast pitch sweep
         ph = 2*np.pi*np.cumsum(f)/SR
-        body = np.sin(ph)*np.exp(-t/0.085)
-        click = rng.normal(0,1,n)*np.exp(-t/0.0012)*0.35
-        # gentle saturation for punch
-        s = np.tanh((body+click)*1.6)
-        s *= (1-np.exp(-t/0.0008))
-        return s*0.95
+        body = np.sin(ph)*np.exp(-t/0.062)
+        body += 0.30*np.sin(2*ph)*np.exp(-t/0.030)   # 2nd-harmonic punch
+        click = rng.normal(0,1,n)*np.exp(-t/0.0009)*0.45
+        s = np.tanh((body+click)*1.8)
+        s *= (1-np.exp(-t/0.0006))
+        return s*0.98
 
     def snare():
         n = int(0.35*SR); t = np.arange(n)/SR
