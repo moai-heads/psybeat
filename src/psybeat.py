@@ -396,7 +396,7 @@ def main(argv: list[str] | None = None) -> int:
     os.makedirs(args.outdir, exist_ok=True)
     mix = render(bpm=args.bpm, bars=args.bars, seed=args.seed)
 
-    stem = f"psytrance_kick_snare_{int(round(args.bpm))}bpm"
+    stem = f"psytrance_{int(round(args.bpm))}bpm"
     wav_path = os.path.join(args.outdir, stem + ".wav")
     sf.write(wav_path, mix, SR)
 
