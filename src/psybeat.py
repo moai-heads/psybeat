@@ -64,19 +64,18 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
         tone  = (np.sin(2*np.pi*185*t)+0.6*np.sin(2*np.pi*278*t))*np.exp(-t/0.045)
         return (noise*0.7 + tone*0.5)*0.85
 
-    def clap():
-        n = int(0.3*SR); t = np.arange(n)/SR
-        nz = sosfilt(butter(2,[900/(SR/2),6000/(SR/2)],btype='band',output='sos'), rng.normal(0,1,n))
-        e = np.zeros(n)
-        for off,g in [(0,1.0),(0.008,0.8),(0.016,0.65),(0.026,0.45)]:
-            i = int(off*SR)
-            e[i:] += g*np.exp(-(np.arange(n-i))/SR/0.035)
-        return nz*e*0.5
-
     def hat(open_=False):
         n = int((0.22 if open_ else 0.07)*SR); t = np.arange(n)/SR
         nz = sosfilt(butter(3, 6500/(SR/2), btype='high', output='sos'), rng.normal(0,1,n))
         return nz*np.exp(-t/(0.075 if open_ else 0.012))*0.28
+
+    def perc():
+        # Sparse rim/tom percussion for syncopated psy accents (no backbeat).
+        n = int(0.12*SR); t = np.arange(n)/SR
+        tone = (np.sin(2*np.pi*320*t) + 0.6*np.sin(2*np.pi*470*t))*np.exp(-t/0.020)
+        nz = sosfilt(butter(2,[1800/(SR/2),8000/(SR/2)],btype='band',output='sos'),
+                     rng.normal(0,1,n))*np.exp(-t/0.008)
+        return (tone*0.5 + nz*0.5)*0.6
 
     # ---------- psy bass ----------
     def bass_note(f, n, res=1.1):
@@ -195,7 +194,7 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
     last_bar = BARS - 1
 
     mix = np.zeros(N + 2*SR)
-    K, S, C, H, HO = kick(), snare(), clap(), hat(), hat(True)
+    K, S, P, H, HO = kick(), snare(), perc(), hat(), hat(True)
 
     def place(buf, sig, tsec, gain=1.0):
         i = int(tsec*SR)
@@ -228,13 +227,12 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
             for b in range(4):
                 place(mix, K, t0+b*BEAT, 1.0)
 
-        # ---- snare/clap backbeat ----
-        if full_drums:
-            for b in (1, 3):
-                place(mix, S, t0+b*BEAT, 0.9)
-                place(mix, C, t0+b*BEAT, 0.55)
-        elif sec == "intro" and bar >= 1:
-            place(mix, S, t0+3*BEAT, 0.6)
+        # ---- sparse syncopated percussion (psy has NO backbeat snare) ----
+        if in_drop and bar % 2 == 1:
+            place(mix, P, t0+1*BEAT+STEP*3, 0.7)
+            place(mix, P, t0+3*BEAT+STEP*1, 0.6)
+        elif sec == "intro" and bar >= 2:
+            place(mix, P, t0+2*BEAT, 0.5)
 
         # ---- rolling psy bassline: kick on the beat, 3 bass hits per beat ----
         # The kick owns step 0 of each beat; the bass gallops on steps 1,2,3
