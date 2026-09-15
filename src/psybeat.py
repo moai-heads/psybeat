@@ -12,7 +12,7 @@ import subprocess
 import sys
 
 import numpy as np
-from scipy.signal import sawtooth, butter, sosfilt, iirfilter
+from scipy.signal import sawtooth, butter, sosfilt, iirfilter, lfilter
 import soundfile as sf
 
 SR = 44100
@@ -169,6 +169,36 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
                      rng.normal(0, 1, n))
         return nz*(t/dur)**2*g
 
+    def dub_delay(x, time, fb=0.45, mix=0.4):
+        """Feedback echo (dotted-eighth style) for the lead bus."""
+        d = int(time*SR)
+        y = x.copy()
+        acc = x.copy()
+        for k in range(1, 6):
+            shift = k*d
+            if shift >= len(x):
+                break
+            acc[shift:] += x[:len(x)-shift]*(fb**k)
+        return x + mix*acc
+
+    def reverb(x, mix=0.22):
+        """Cheap feedback-comb reverb (parallel combs via lfilter)."""
+        out = np.zeros_like(x)
+        for tcomb, g in [(0.0297, 0.78), (0.0371, 0.74), (0.0411, 0.71), (0.0437, 0.68)]:
+            d = int(tcomb*SR)
+            a = np.zeros(d+1); a[0] = 1.0; a[d] = -g
+            out += lfilter([1.0], a, x)
+        out /= 4.0
+        return x*(1-mix) + out*mix
+
+    def process_lead(x):
+        """Dub delay + reverb glue for the psy lead bus."""
+        d = int((BEAT*3/4)*SR)          # dotted eighth
+        y = dub_delay(x, BEAT*3/4, fb=0.42, mix=0.38)
+        y = reverb(y, mix=0.25)
+        return y*0.9
+
+
     # ---------- arrangement ----------
     # Section map as fractions of total length, so it scales with --bars.
     # 32 bars @ 145 BPM ->
@@ -302,7 +332,7 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
 
         # ---- intro filter sweep feel: thin out first bars via gains already applied ----
 
-    mix += lead
+    mix += process_lead(lead)
 
     # ---------- sidechain duck (kick ducks the bass/lead) ----------
     duck = np.ones(len(mix))
