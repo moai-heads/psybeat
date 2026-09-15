@@ -13,12 +13,29 @@ dub delay + reverb, sidechain) straight to WAV/MP3 — no samples, no DAW.
 pip install numpy scipy soundfile
 ```
 
+### Optional: the female vocal
+
+The generator loads a small pre-rendered dry vocal from
+`assets/vocal_dry.wav` if present (and skips it otherwise). It is produced
+by `tools/render_vocal.py`, which needs a neural TTS (piper) + a female
+voice model, installed **outside** the repo:
+
+```bash
+python3 -m venv /root/.venv-piper
+/root/.venv-piper/bin/pip install numpy scipy soundfile piper-tts
+/root/.venv-piper/bin/python tools/render_vocal.py   # -> assets/vocal_dry.wav
+```
+
+The voice model (`en_US-amy-medium`) and venv are not committed; only the
+tiny resulting WAV asset is tracked.
+
 ## Usage
 
 ```bash
 python3 src/psybeat.py                       # 145 BPM, 32 bars -> out/
 python3 src/psybeat.py --bpm 148 --bars 32   # custom
 python3 src/psybeat.py --no-mp3              # WAV only
+python3 src/psybeat.py --no-vocal            # instrumental
 ```
 
 Output lands in `out/psytrance_<bpm>bpm.{wav,mp3}`.
@@ -36,6 +53,9 @@ Output lands in `out/psytrance_<bpm>bpm.{wav,mp3}`.
   delay — no supersaw chord stabs, no plucky stabs.
 - **No trance breakdown** — the break strips kick/bass and builds with an
   acid motif, sweep and riser.
+- **Ethereal female vocal** — one psychedelic couplet floats across the
+  breakdown on a dotted-delay + big-reverb chain, tailing into DROP 2
+  (`--no-vocal` to drop it).
 
 ## Signal chain
 
@@ -52,6 +72,7 @@ Output lands in `out/psytrance_<bpm>bpm.{wav,mp3}`.
 | Lead FX    | dotted-eighth feedback delay + parallel-comb reverb               |
 | Riser      | band-swept noise + rising tone, ends on a small impact            |
 | Impact     | pitch-swept boom + noise burst, drops land on the downbeat        |
+| Vocal      | neural TTS (piper) female line, de-essed + air + sat + detuned doubler + delay + reverb |
 | Glue       | kick-keyed sidechain ducking, tanh master limiter                 |
 
 ## Structure (32 bars, --bars scales it proportionally)
@@ -61,7 +82,7 @@ Output lands in `out/psytrance_<bpm>bpm.{wav,mp3}`.
 | 0-4    | intro      | kick + rolling bass, sparse percussion                        |
 | 4-8    | build      | full drums, hats; last bar = accelerating snare roll + riser  |
 | 8-16   | **DROP 1** | full gallop bass, acid lead, FM accents, psy lead, impact     |
-| 16-20  | breakdown  | kick/bass out - acid motif on the FX bus, uplift               |
+| 16-20  | breakdown  | kick/bass out - acid motif + female vocal on the FX bus, uplift |
 | 20-22  | build 2    | snare roll + riser into the second drop                        |
 | 22-28  | **DROP 2** | bigger: octave bass lifts, FM accents every bar, brighter      |
 | 28-32  | outro      | strips back down                                                |
@@ -70,7 +91,8 @@ Output lands in `out/psytrance_<bpm>bpm.{wav,mp3}`.
 
 ```
 src/psybeat.py   # the whole generator (CLI entry point)
-tools/           # helper scripts
+tools/           # helper scripts (render_vocal.py renders the vocal asset)
+assets/          # small tracked audio assets (vocal_dry.wav)
 out/             # rendered audio (gitignored)
 AGENTS.md        # instructions for agents working in this repo
 ```

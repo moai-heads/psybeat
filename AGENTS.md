@@ -36,6 +36,12 @@ Examples:
 - Determinism: a fixed RNG seed is used for noise. If you add
   randomness, expose it as a seed and keep the default reproducible.
 - Output files (`out/`, `*.wav`, `*.mp3`) are gitignored — never commit them.
+  Exception: small *source* assets under `assets/` (e.g. `vocal_dry.wav`)
+  are tracked on purpose via a `!assets/*.wav` rule. Keep them small.
+- The female vocal asset is produced by `tools/render_vocal.py`, which runs
+  under `/root/.venv-piper` (piper-tts + `en_US-amy-medium` voice model,
+  both outside the repo). `src/psybeat.py` itself stays pure-DSP and merely
+  loads the WAV if present.
 
 ## Remote
 
