@@ -108,33 +108,31 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
             out[i:j] = sosfilt(sos, x[i:j])
         return out*0.5
 
-    # ---------- supersaw / trance lead ----------
-    def supersaw_note(f, n, voices=7, detune=0.012, cutoff=4200.0):
+    # ---------- psytrance lead voices ----------
+    def fm_squelch(f, n, index=5.0):
+        """Metallic FM squelch blip for psy accents."""
         t = np.arange(n)/SR
-        out = np.zeros(n)
-        spread = np.linspace(-detune, detune, voices)
-        for i, d in enumerate(spread):
-            out += sawtooth(2*np.pi*f*(1+d)*t + i*0.7)
-        out /= voices
-        e = env_ad(n, 0.006, 0.5, 2.0)
-        e *= np.clip(1.0 - t/(n/SR*1.6), 0, 1)
-        sos = iirfilter(2, min(cutoff/(SR/2), 0.98), btype='low', ftype='butter', output='sos')
-        return sosfilt(sos, out*e)*0.55
+        mod = np.sin(2*np.pi*f*3.0*t)*np.exp(-t/0.03)
+        ph = 2*np.pi*f*t + index*mod
+        e = np.exp(-t/0.045)
+        return np.sin(ph)*e*0.4
 
-    def pluck_note(f, n):
-        """Short detuned pluck (rolling trance arp voice)."""
+    def psy_lead_note(f, n, bend=0.0, bright=1.0):
+        """Distorted saw lead with optional pitch bend (303/psy flavour)."""
         t = np.arange(n)/SR
-        osc = (sawtooth(2*np.pi*f*t) + 0.6*sawtooth(2*np.pi*f*1.01*t))
-        e = env_ad(n, 0.001, 0.035, 4.0)
+        frac = np.clip(t/max(t[-1], 1e-6), 0, 1)
+        fenv = f*2**(bend*frac)
+        ph = 2*np.pi*np.cumsum(fenv)/SR
+        osc = sawtooth(ph)
+        e = env_ad(n, 0.003, 0.10, 3.0)
         x = osc*e
-        fc = 900 + 6000*np.exp(-t/0.03)
         out = np.zeros(n)
         blk = 128
         for i in range(0, n, blk):
             j = min(i+blk, n)
-            sos = iirfilter(2, min(fc[i]/(SR/2), 0.98), btype='low', ftype='butter', output='sos')
-            out[i:j] = sosfilt(sos, x[i:j])
-        return out*0.4
+            fc = 300 + 2600*np.exp(-t[i]/0.09)*bright
+            out[i:j] = sosfilt(rbj_lp(fc, 7.0), x[i:j])
+        return np.tanh(out*2.2)*0.45
 
     # ---------- transition FX ----------
     def riser(n, f0=200.0, f1=6000.0, shape=2.0):
@@ -194,6 +192,7 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
     last_bar = BARS - 1
 
     mix = np.zeros(N + 2*SR)
+    lead = np.zeros(N + 2*SR)   # lead bus -> delay/reverb FX
     K, S, P, H, HO = kick(), snare(), perc(), hat(), hat(True)
 
     def place(buf, sig, tsec, gain=1.0):
@@ -204,12 +203,7 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
 
     # chord roots (semitones from A) cycled per bar: Am - F - C - G
     CHORD = [0, -4, 3, -2]
-    TRIAD = [0, 3, 7]
     A2 = 110.0
-
-    def chord_freqs(root_semi, octave=0):
-        base = A2*2**(root_semi/12)*2**octave
-        return [base*2**(s/12) for s in TRIAD]
 
     for bar in range(BARS):
         t0 = bar*BAR
@@ -264,39 +258,34 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
             for b in range(4):
                 place(mix, H, t0+b*BEAT+STEP*2, 0.7)
 
-        # ---- DROP leads: supersaw chord + acid + arp pluck ----
+        # ---- DROP leads: acid squelch + FM accents + psy lead ----
         if in_drop:
-            lead_gain = 0.42 if is_drop2 else 0.34
-            # supersaw pads chording on the beat
-            for b, ct in ((0, chord_freqs(chord)), (2, chord_freqs(chord, 1))):
-                for f in ct:
-                    place(mix, supersaw_note(f, int(BEAT*0.9*SR),
-                                             voices=7, detune=0.010,
-                                             cutoff=5200 if is_drop2 else 4200),
-                          t0+b*BEAT, lead_gain)
-            # acid 16th lead
+            lg = 0.5 if is_drop2 else 0.42
+            # acid 16th squelch line (into the FX lead bus)
             for s in range(16):
                 if s % 2 == 1 and (bar+s) % 4 != 0:
                     continue
                 f = A2*2**(chord/12)*2**(ACID_SEMIS[s]/12)
-                place(mix, acid_note(f, int(STEP*1.6*SR), 1.0 if is_drop2 else 0.7),
-                      t0+s*STEP, 0.45)
-            # plucky 16th arp (drop 2 only) - octave-jumping chord tones
-            if is_drop2:
-                for s in range(16):
-                    f = A2*2**(chord/12)*2**(TRIAD[s % 3]/12)*2**(1 if s % 4 >= 2 else 0)
-                    place(mix, pluck_note(f, int(STEP*1.2*SR)), t0+s*STEP, 0.5)
-
-        # ---- breakdown: atmospheric leads, no kick/bass ----
-        if sec == "breakdown":
-            # sustained supersaw chord across the section
-            for f in chord_freqs(chord):
-                place(mix, supersaw_note(f, int(BAR*SR*0.95), voices=9, detune=0.014,
-                                         cutoff=2600), t0, 0.40)
-            # slow acid motif on the offbeats
-            for s in (2, 6, 10, 14):
+                place(lead, acid_note(f, int(STEP*1.6*SR), 1.0 if is_drop2 else 0.7),
+                      t0+s*STEP, 0.5)
+            # FM squelch accents on offbeats (always in drop 2, every other bar in drop 1)
+            if is_drop2 or bar % 2 == 0:
+                for s in (3, 7, 11, 15):
+                    f = A2*2**(chord/12)*2**((ACID_SEMIS[s]+7)/12)
+                    place(lead, fm_squelch(f, int(STEP*SR)), t0+s*STEP, 0.5)
+            # psy lead motif: distorted saw with pitch bends
+            for s, bend in [(0, 0.0), (4, 0.58), (8, 0.0), (12, -0.58)]:
                 f = A2*2**(chord/12)*2**(ACID_SEMIS[s]/12)
-                place(mix, acid_note(f, int(STEP*2.0*SR), 0.5), t0+s*STEP, 0.4)
+                place(lead, psy_lead_note(f, int(BEAT*0.9*SR), bend=bend,
+                                          bright=1.2 if is_drop2 else 1.0),
+                      t0+s*STEP, lg*0.8)
+
+        # ---- breakdown: lead motif on the FX bus, no kick/bass ----
+        if sec == "breakdown":
+            # slow acid motif into the lead bus (gets delay/reverb)
+            for s, semi in [(0, 0), (4, 3), (8, 7), (12, 10)]:
+                f = A2*2**(chord/12)*2**(semi/12)
+                place(lead, acid_note(f, int(BEAT*1.5*SR), 0.7), t0+s*STEP, 0.5)
             place(mix, uplift(0.7, 0.5), t0+BAR-0.7, 1.0)
 
         # ---- build risers: last bar of build/build2 accelerates snares + riser ----
@@ -312,6 +301,8 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
             place(mix, impact(1.4, 1.0), t0, 0.9)
 
         # ---- intro filter sweep feel: thin out first bars via gains already applied ----
+
+    mix += lead
 
     # ---------- sidechain duck (kick ducks the bass/lead) ----------
     duck = np.ones(len(mix))
