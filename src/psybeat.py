@@ -18,7 +18,8 @@ import soundfile as sf
 SR = 44100
 
 
-def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
+def render(bpm: float = 145.0, bars: int = 16, seed: int = 7,
+           vocal: bool = True) -> np.ndarray:
     """Render the track and return a float32 stereo-ready mono buffer."""
     BPM = bpm
     BEAT = 60.0 / BPM
@@ -222,6 +223,50 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
         y = reverb(y, mix=0.25)
         return y*0.9
 
+    # ---------- female vocal: load + ethereal psy FX chain ----------
+    VOCAL_DRY = os.path.join(os.path.dirname(__file__), "..", "assets",
+                             "vocal_dry.wav")
+
+    def load_vocal():
+        """Load the pre-rendered dry female vocal asset (44.1k mono)."""
+        if not os.path.exists(VOCAL_DRY):
+            return None
+        x, sr = sf.read(VOCAL_DRY, dtype="float64")
+        if x.ndim > 1:
+            x = x.mean(axis=1)
+        if sr != SR:
+            from scipy.signal import resample_poly
+            x = resample_poly(x, SR, sr)
+        return x
+
+    def vocal_fx(x):
+        """Air + de-ess + saturation + detuned doubler + dotted delay + reverb.
+
+        Turns a dry TTS line into a floating, echoed psy vocal that smears
+        across the breakdown and tails into the following drop.
+        """
+        # high-pass: remove any low rumble from the voice
+        x = sosfilt(butter(2, 130/(SR/2), btype="high", output="sos"), x)
+        # gentle de-ess: shave the 6-7.5k sibilance band
+        ess = sosfilt(butter(2, [6000/(SR/2), 7500/(SR/2)], btype="band",
+                             output="sos"), x)
+        x = x - ess*0.6
+        # air: parallel high shelf >8k
+        air = sosfilt(butter(2, 8000/(SR/2), btype="high", output="sos"), x)
+        x = x + air*0.28
+        # saturation for presence in the mix
+        x = np.tanh(x*1.7)*0.85
+        # detuned doubler (~12 ms) for width/shimmer
+        d = int(0.012*SR)
+        dbl = np.zeros_like(x)
+        dbl[d:] = x[:-d]
+        x = x + dbl*0.4
+        # dotted-eighth echo: long tail that carries into the drop
+        x = dub_delay(x, BEAT*3/4, fb=0.52, mix=0.5)
+        # big floaty reverb
+        x = reverb(x, mix=0.45)
+        return x
+
 
     # ---------- arrangement ----------
     # Section map as fractions of total length, so it scales with --bars.
@@ -244,6 +289,12 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
         for b in range(b0, b1):
             bounds[b] = name
     last_bar = BARS - 1
+
+    bars_of = {}
+    for b, nm in bounds.items():
+        bars_of.setdefault(nm, []).append(b)
+    bd_start = min(bars_of.get("breakdown", [0]))
+    vox = load_vocal() if vocal else None
 
     mix = np.zeros(N + 2*SR)
     lead = np.zeros(N + 2*SR)   # lead bus -> delay/reverb FX
@@ -347,6 +398,10 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
                 f = A2*2**(chord/12)*2**(semi/12)
                 place(lead, acid_note(f, int(BEAT*1.5*SR), 0.7), t0+s*STEP, 0.5)
             place(mix, uplift(0.7, 0.5), t0+BAR-0.7, 1.0)
+            # female vocal: one pass at the head of the breakdown; its
+            # dotted-delay / reverb tail floats into the build and DROP 2.
+            if vox is not None and bar == bd_start:
+                place(mix, vocal_fx(vox), t0 + BEAT*0.5, 0.9)
 
         # ---- build risers: last bar of build/build2 accelerates snares + riser ----
         if sec in ("build", "build2") and bar == max(b for b in bounds if bounds[b] == sec):
@@ -420,10 +475,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seed", type=int, default=7, help="RNG seed (default 7)")
     ap.add_argument("--outdir", default="out", help="output directory (default out/)")
     ap.add_argument("--no-mp3", action="store_true", help="skip MP3 encoding")
+    ap.add_argument("--no-vocal", action="store_true",
+                    help="drop the female vocal even if the asset exists")
     args = ap.parse_args(argv)
 
     os.makedirs(args.outdir, exist_ok=True)
-    mix = render(bpm=args.bpm, bars=args.bars, seed=args.seed)
+    mix = render(bpm=args.bpm, bars=args.bars, seed=args.seed,
+                 vocal=not args.no_vocal)
 
     stem = f"psytrance_{int(round(args.bpm))}bpm"
     wav_path = os.path.join(args.outdir, stem + ".wav")
