@@ -34,6 +34,14 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
         dec = np.exp(-t/d)
         return atk*dec
 
+    def rbj_lp(fc, q):
+        """Resonant (RBJ biquad) lowpass, returned as a one-section sos."""
+        w0 = 2*np.pi*np.clip(fc, 20.0, SR*0.49)/SR
+        alpha = np.sin(w0)/(2*q)
+        b0 = (1-np.cos(w0))/2; b1 = 1-np.cos(w0); b2 = b0
+        a0 = 1+alpha; a1 = -2*np.cos(w0); a2 = 1-alpha
+        return np.array([[b0/a0, b1/a0, b2/a0, 1.0, a1/a0, a2/a0]])
+
     # ---------- drums ----------
     def kick():
         # Psy kick: fast vertical pitch drop, short punchy decay, tight sub tail.
@@ -71,15 +79,19 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
         return nz*np.exp(-t/(0.075 if open_ else 0.012))*0.28
 
     # ---------- psy bass ----------
-    def bass_note(f, n):
+    def bass_note(f, n, res=1.1):
+        # Psy rolling bass: sine fundamental + a touch of saw grit, fast pitch
+        # fall on attack, short punchy envelope so 16ths never smear together.
         t = np.arange(n)/SR
-        osc = (sawtooth(2*np.pi*f*t) + 0.85*sawtooth(2*np.pi*f*1.004*t+0.4)
-               + 0.5*np.sin(2*np.pi*f*0.5*t))
-        e = env_ad(n, 0.0015, 0.055, 4.0)
-        e *= np.clip(1.0 - t/(n/SR*0.98), 0, 1)**0.7
+        fenv = f*(1 + 0.05*np.exp(-t/0.010))          # slight downward pitch blip
+        ph = 2*np.pi*np.cumsum(fenv)/SR
+        osc = (np.sin(ph) + 0.35*np.sin(2*ph)
+               + 0.22*sawtooth(2*np.pi*f*t))
+        e = env_ad(n, 0.0009, 0.038, 5.0)
+        e *= np.clip(1.0 - t/(n/SR*0.98), 0, 1)**0.6
         x = osc*e
-        sos = iirfilter(2, 780/(SR/2), btype='low', ftype='butter', output='sos')  # resonant LP
-        return sosfilt(sos, x)*0.9
+        out = sosfilt(rbj_lp(840, 1.0 + res), x)  # resonant LP grit
+        return out*0.95
 
     # ---------- acid lead ----------
     ACID_SEMIS = [0,0,12,0, 3,0,7,12, 0,10,0,7, 3,12,0,15]   # A minor-ish
@@ -224,16 +236,24 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
         elif sec == "intro" and bar >= 1:
             place(mix, S, t0+3*BEAT, 0.6)
 
-        # ---- rolling 16th bassline ----
+        # ---- rolling psy bassline: kick on the beat, 3 bass hits per beat ----
+        # The kick owns step 0 of each beat; the bass gallops on steps 1,2,3
+        # (the classic "rolling" 3-note-per-beat psytrance bassline).
         if bass_on:
             bass_gain = 0.95 if not in_drop else 1.05
-            for s in range(16):
-                f = A2*2**(chord/12)*0.5          # A1-ish root
-                if is_drop2 and s in (7, 15):
-                    f *= 2                          # octave lift in drop 2
-                elif in_drop and s in (15,):
-                    f *= 2
-                place(mix, bass_note(f, int(STEP*SR*0.99)), t0+s*STEP, bass_gain)
+            root = A2*2**(chord/12)*0.5           # A1-ish root
+            for b in range(4):
+                for k in (1, 2, 3):
+                    f = root
+                    s_glob = b*4 + k
+                    # psychedelic movement: octave/fifth lifts on off accents
+                    if in_drop and s_glob == 15:
+                        f *= 2                     # bar-end octave lift
+                    elif is_drop2 and s_glob in (7, 11):
+                        f *= 2
+                    elif sec == "build" and k == 3:
+                        f *= 2**(1 if b % 2 else 0)
+                    place(mix, bass_note(f, int(STEP*SR*0.62)), t0+b*BEAT+k*STEP, bass_gain)
 
         # ---- hats ----
         if full_drums and sec != "intro":
