@@ -117,22 +117,40 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
         e = np.exp(-t/0.045)
         return np.sin(ph)*e*0.4
 
-    def psy_lead_note(f, n, bend=0.0, bright=1.0):
-        """Distorted saw lead with optional pitch bend (303/psy flavour)."""
+    def trance_lead_note(f, n, bend=0.0, bright=1.0, voices=3, detune=0.006):
+        """Sustained detuned trance lead: sings into the delay instead of
+        stabbing. Gentle attack + sustain/release, soft resonant filter open."""
         t = np.arange(n)/SR
         frac = np.clip(t/max(t[-1], 1e-6), 0, 1)
         fenv = f*2**(bend*frac)
-        ph = 2*np.pi*np.cumsum(fenv)/SR
-        osc = sawtooth(ph)
-        e = env_ad(n, 0.003, 0.10, 3.0)
-        x = osc*e
         out = np.zeros(n)
-        blk = 128
-        for i in range(0, n, blk):
-            j = min(i+blk, n)
-            fc = 300 + 2600*np.exp(-t[i]/0.09)*bright
-            out[i:j] = sosfilt(rbj_lp(fc, 7.0), x[i:j])
-        return np.tanh(out*2.2)*0.45
+        spread = np.linspace(-detune, detune, voices)
+        for i, d in enumerate(spread):
+            ph = 2*np.pi*np.cumsum(fenv*(1+d))/SR
+            out += sawtooth(ph + i*0.5)
+        out /= voices
+        # sustain envelope: short attack, long release (no plucky decay)
+        a = max(int(0.012*SR), 1); r = max(int(0.06*SR), 1)
+        e = np.ones(n)
+        e[:a] = np.linspace(0, 1, a)
+        if n > r:
+            e[-r:] *= np.linspace(1, 0, r)
+        x = out*e
+        fc = 600 + 3200*np.exp(-t/0.25)*bright
+        y = np.zeros(n)
+        for i in range(0, n, 128):
+            j = min(i+128, n)
+            y[i:j] = sosfilt(rbj_lp(fc[i], 3.2), x[i:j])
+        return np.tanh(y*1.5)*0.4
+
+    # Lead motifs, indexed per 4-bar phrase (step, semitone, length in steps).
+    # Different contour each phrase so the hook evolves instead of repeating.
+    LEAD_MOTIFS = [
+        [(0, 0, 4), (4, 3, 2), (6, 7, 2), (8, 10, 4), (12, 7, 4)],
+        [(0, 12, 2), (2, 10, 2), (4, 7, 4), (8, 3, 2), (10, 0, 2), (12, -2, 4)],
+        [(0, 0, 2), (2, 7, 2), (4, 10, 2), (6, 12, 2), (8, 10, 2), (10, 7, 2), (12, 3, 4)],
+        [(0, 3, 4), (4, 7, 4), (8, 10, 2), (10, 12, 2), (12, 15, 4)],
+    ]
 
     # ---------- transition FX ----------
     def riser(n, f0=200.0, f1=6000.0, shape=2.0):
@@ -304,12 +322,15 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
                 for s in (3, 7, 11, 15):
                     f = A2*2**(chord/12)*2**((ACID_SEMIS[s]+7)/12)
                     place(lead, fm_squelch(f, int(STEP*SR)), t0+s*STEP, 0.5)
-            # psy lead motif: distorted saw with pitch bends
-            for s, bend in [(0, 0.0), (4, 0.58), (8, 0.0), (12, -0.58)]:
-                f = A2*2**(chord/12)*2**(ACID_SEMIS[s]/12)
-                place(lead, psy_lead_note(f, int(BEAT*0.9*SR), bend=bend,
-                                          bright=1.2 if is_drop2 else 1.0),
-                      t0+s*STEP, lg*0.8)
+            # sustained trance lead: motif varies per 4-bar phrase
+            motif = LEAD_MOTIFS[(bar // 4) % len(LEAD_MOTIFS)]
+            for i, (s, semi, ln) in enumerate(motif):
+                f = A2*2*2**(semi/12)            # an octave up: bright lead register
+                bend = (0.25 if i % 3 == 1 else (-0.25 if i % 3 == 2 else 0.0))
+                place(lead, trance_lead_note(f, int(ln*STEP*SR), bend=bend,
+                                             bright=1.25 if is_drop2 else 1.0,
+                                             voices=4 if is_drop2 else 3),
+                      t0+s*STEP, lg*0.75)
 
         # ---- breakdown: lead motif on the FX bus, no kick/bass ----
         if sec == "breakdown":
