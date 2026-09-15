@@ -93,7 +93,13 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
         return out*0.95
 
     # ---------- acid lead ----------
-    ACID_SEMIS = [0,0,12,0, 3,0,7,12, 0,10,0,7, 3,12,0,15]   # A minor-ish
+    # Acid semitone patterns rotated per 4-bar phrase so the line evolves.
+    ACID_PATTERNS = [
+        [0,0,12,0, 3,0,7,12, 0,10,0,7, 3,12,0,15],
+        [0,12,0,3, 0,7,0,10, 12,0,15,0, 12,7,3,0],
+        [0,0,3,0, 7,0,10,12, 0,3,0,7, 12,0,10,0],
+    ]
+    ACID_SEMIS = ACID_PATTERNS[0]
     def acid_note(f, n, bright):
         t = np.arange(n)/SR
         osc = sawtooth(2*np.pi*f*t)
@@ -307,21 +313,23 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
             for b in range(4):
                 place(mix, H, t0+b*BEAT+STEP*2, 0.7)
 
-        # ---- DROP leads: acid squelch + FM accents + psy lead ----
+        # ---- DROP leads: acid squelch + sparse FM accents + trance lead ----
         if in_drop:
             lg = 0.5 if is_drop2 else 0.42
+            pidx = (bar // 4 + (1 if is_drop2 else 0)) % len(ACID_PATTERNS)
+            pat = ACID_PATTERNS[pidx]
             # acid 16th squelch line (into the FX lead bus)
             for s in range(16):
                 if s % 2 == 1 and (bar+s) % 4 != 0:
                     continue
-                f = A2*2**(chord/12)*2**(ACID_SEMIS[s]/12)
+                f = A2*2**(chord/12)*2**(pat[s]/12)
                 place(lead, acid_note(f, int(STEP*1.6*SR), 1.0 if is_drop2 else 0.7),
                       t0+s*STEP, 0.5)
-            # FM squelch accents on offbeats (always in drop 2, every other bar in drop 1)
-            if is_drop2 or bar % 2 == 0:
-                for s in (3, 7, 11, 15):
-                    f = A2*2**(chord/12)*2**((ACID_SEMIS[s]+7)/12)
-                    place(lead, fm_squelch(f, int(STEP*SR)), t0+s*STEP, 0.5)
+            # FM squelch: sparse softer accents on the last bar of each phrase
+            if bar % 4 == 3:
+                for s in (11, 15):
+                    f = A2*2**(chord/12)*2**((pat[s]+7)/12)
+                    place(lead, fm_squelch(f, int(STEP*SR), index=3.5), t0+s*STEP, 0.4)
             # sustained trance lead: motif varies per 4-bar phrase
             motif = LEAD_MOTIFS[(bar // 4) % len(LEAD_MOTIFS)]
             for i, (s, semi, ln) in enumerate(motif):
