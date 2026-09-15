@@ -2,6 +2,7 @@ out/
 *.wav
 *.mp3
 *.flac
+!assets/*.wav
 __pycache__/
 *.pyc
 .venv/
