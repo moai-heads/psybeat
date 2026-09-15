@@ -231,8 +231,9 @@ def render(bpm: float = 145.0, bars: int = 16, seed: int = 7) -> np.ndarray:
         if j > i:
             buf[i:j] += sig[:j-i]*gain
 
-    # chord roots (semitones from A) cycled per bar: Am - F - C - G
-    CHORD = [0, -4, 3, -2]
+    # Hypnotic mostly-root bassline: A A A G (semitones from A).
+    # Psy basses lock to the root; movement comes from the acid lead, not chords.
+    CHORD = [0, 0, 0, -2]
     A2 = 110.0
 
     for bar in range(BARS):
