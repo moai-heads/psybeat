@@ -32,7 +32,8 @@ Output lands in `out/psytrance_<bpm>bpm.{wav,mp3}`.
 - **Root-locked hypnotic bass** (A A A G) — movement comes from the acid lead,
   not from trance chord pads.
 - **Acid/FM squelch lead** with resonant filter sweeps and tanh drive, plus a
-  dub-delayed distorted saw lead — no supersaw chord stabs.
+  sustained detuned trance melody (motif changes every 4 bars) into a dub
+  delay — no supersaw chord stabs, no plucky stabs.
 - **No trance breakdown** — the break strips kick/bass and builds with an
   acid motif, sweep and riser.
 
@@ -46,8 +47,8 @@ Output lands in `out/psytrance_<bpm>bpm.{wav,mp3}`.
 | Hats       | highpassed noise, short (closed) / long (open) decays             |
 | Bass       | sine + saw grit, slight pitch fall, short envelope, resonant LP   |
 | Acid lead  | saw through a Q-swept resonant LP with tanh distortion (303-style)|
-| FM squelch | FM blip with fast-decaying modulator for metallic psy accents     |
-| Psy lead   | distorted saw with optional pitch bend                            |
+| FM squelch | FM blip, sparse softer accents (bar-ends)                         |
+| Trance lead| sustained detuned saw, per-phrase motif, opens into the delay      |
 | Lead FX    | dotted-eighth feedback delay + parallel-comb reverb               |
 | Riser      | band-swept noise + rising tone, ends on a small impact            |
 | Impact     | pitch-swept boom + noise burst, drops land on the downbeat        |
